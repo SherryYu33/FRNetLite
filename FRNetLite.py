@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from ptflops import get_model_complexity_info
-import time
 
 
 # https://github.com/Andong-Li-speech/TaylorSENet/blob/main/utils/utils.py
