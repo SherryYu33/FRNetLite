@@ -1,4 +1,4 @@
-## FRNetLite: A Lite and Casual Network for Speech Enhancement
+## FRNetLite: A Lite and Causal Network for Speech Enhancement
 
 #### DNS Challenge 2020 non-blind testset without reverberation
 
