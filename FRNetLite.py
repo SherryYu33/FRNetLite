@@ -5,7 +5,38 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from ptflops import get_model_complexity_info
+import time
 
+
+def compress(x, beta=0.5):
+    
+    # (B 2*F T)
+    x_real, x_imag = torch.chunk(x, 2, dim=1)
+    x_mag = ((x_real**2+x_imag**2)**0.5)**beta
+    x_phase = torch.atan2(x_imag, x_real)
+    
+    real = x_mag*torch.cos(x_phase)
+    imag = x_mag*torch.sin(x_phase)
+    
+    out = torch.cat([real, imag], dim=1)
+    
+    return out
+
+def stft(x, win_len, win_inc):
+    
+    X = torch.stft(x, win_len, win_inc, win_len, torch.hann_window(win_len, device=x.device), return_complex=False)
+    X_real, X_imag = torch.chunk(X, 2, dim=-1)
+    Y = torch.cat([X_real.squeeze(-1), X_imag.squeeze(-1)], dim=1)
+    
+    return Y
+
+def istft(x, win_len, win_inc):
+    
+    x_real, x_imag = torch.chunk(x, 2, dim=1)
+    X = torch.stack([x_real, x_imag], dim=-1)
+    y = torch.istft(X, win_len, win_inc, win_len, torch.hann_window(win_len, device=x.device), return_complex=False)
+
+    return y
 
 # https://github.com/Andong-Li-speech/TaylorSENet/blob/main/utils/utils.py
 class CumulativeLayerNorm1d(nn.Module):
@@ -496,6 +527,8 @@ class RefineBlock(nn.Module):
 
 class FRNetLite(nn.Module):
     def __init__(self,
+                 win_len=320,
+                 win_inc=160,
                  U2Net_channel_list1=(1, 16, 32, 64),
                  U2Net_channel_list2=(2, 16, 32, 64),
                  U2Net_kernel_size1=(2, 5),
@@ -513,6 +546,8 @@ class FRNetLite(nn.Module):
                  GGM_num_repeats=2):
         super(FRNetLite, self).__init__()
         
+        self.win_len = win_len
+        self.win_inc = win_inc
         self.mag_encoder = U2Net(U2Net_channel_list1,
                                  U2Net_kernel_size1,
                                  U2Net_kernel_size2,
@@ -546,6 +581,7 @@ class FRNetLite(nn.Module):
         
     def forward(self, x):
         
+        x = compress(stft(x, self.win_len, self.win_inc), 0.5)
         # (B 2*F T)
         x_real, x_imag = torch.chunk(x, 2, dim=1)
         # (B 1 T F)
@@ -570,19 +606,28 @@ class FRNetLite(nn.Module):
         f_real, f_imag = self.ri_decoder(ri_feat, x_real, x_imag)
         s_real, s_imag = CRM(x_real, x_imag, g, f_real, f_imag)
         s = torch.cat([s_real, s_imag], dim=1)
+        s = istft(compress(s, 2), self.win_len, self.win_inc)
         
         return s
     
 def test_model(net):
     
-    macs, params = get_model_complexity_info(net, (322, 100), as_strings=False, print_per_layer_stat=False)
-    x = torch.rand(1, 322, 100)
-    y = net(x)
+    macs, params = get_model_complexity_info(net, (16000,), as_strings=False, print_per_layer_stat=False)
+    x = torch.rand(1, 16000)
+    T = 0
+    times = 1
+    for _ in range(times):
+        T1 = time.perf_counter()
+        y = net(x)
+        T2 = time.perf_counter()
+        T = T+T2-T1
+    T = T/times
     print(f'macs: {macs/(10**9):.2f} G')
     print(f'params: {params/(10**6):.2f} M')
     print('{} -> {}'.format(x.shape, y.shape))
+    print(f'time: {T*100:.2f} ms')
     
 if __name__ == '__main__':
-    torch.manual_seed(20)
+    torch.manual_seed(777)
     net = FRNetLite()
     test_model(net)
