@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from ptflops import get_model_complexity_info
-import time
 
 
 def compress(x, beta=0.5):
@@ -581,6 +580,7 @@ class FRNetLite(nn.Module):
         
     def forward(self, x):
         
+        # (B T)
         x = compress(stft(x, self.win_len, self.win_inc), 0.5)
         # (B 2*F T)
         x_real, x_imag = torch.chunk(x, 2, dim=1)
@@ -612,20 +612,12 @@ class FRNetLite(nn.Module):
     
 def test_model(net):
     
-    macs, params = get_model_complexity_info(net, (16000,), as_strings=False, print_per_layer_stat=False)
+    macs, params = get_model_complexity_info(net, (16000, ), as_strings=False, print_per_layer_stat=False)
     x = torch.rand(1, 16000)
-    T = 0
-    times = 1
-    for _ in range(times):
-        T1 = time.perf_counter()
-        y = net(x)
-        T2 = time.perf_counter()
-        T = T+T2-T1
-    T = T/times
+    y = net(x)
     print(f'macs: {macs/(10**9):.2f} G')
     print(f'params: {params/(10**6):.2f} M')
     print('{} -> {}'.format(x.shape, y.shape))
-    print(f'time: {T*100:.2f} ms')
     
 if __name__ == '__main__':
     torch.manual_seed(777)
